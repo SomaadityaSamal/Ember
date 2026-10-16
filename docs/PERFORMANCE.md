@@ -1,10 +1,21 @@
 # Performance and verification
 
-Measured locally on an Apple M4 Mac, macOS 27, using the release arm64 build of Ember 0.2.0. These are short observations on a working machine with other apps active, not battery-life or energy measurements.
+Measured locally on an Apple M4 Mac, macOS 27, using release arm64 builds. These are short observations on a working machine with other apps active, not battery-life or energy measurements.
 
 ## CPU and memory
 
 Each row uses six five-second `top` intervals after discarding its initial sample. **100% CPU means one logical core**, as in Activity Monitor. Memory is the final `top` memory value for the menu bar app; the optional root helper and fan client are separate processes.
+
+### Ember 0.2.1: continuous animation
+
+| Dashboard | Animation | Polling | Mean CPU | Peak CPU | App memory |
+| --- | --- | --- | ---: | ---: | ---: |
+| Open, fan spinning | On | 5 seconds | 0.62% | 0.70% | 67 MB |
+| Closed | On | 5 seconds | 0.75% | 0.80% | 61 MB |
+
+The orbit previously advanced twice per second, the fan four times per second, and the menu indicator used a redraw timer. Version 0.2.1 replaces those steps with cached layers animated continuously by Core Animation. Sensor polls do not restart the rotation. Closing the dashboard or disabling animation removes its animations, and Reduce Motion is honored. These numbers measure the app process; work performed by the system compositor and GPU is not attributed here, so they do not establish total energy savings.
+
+### Ember 0.2.0: earlier animation baseline
 
 | Dashboard | Animation | Polling | Mean CPU | Peak CPU | App memory |
 | --- | --- | --- | ---: | ---: | ---: |

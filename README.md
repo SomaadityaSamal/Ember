@@ -51,9 +51,9 @@ Non-automatic modes are session-only. A connection loss, expired heartbeat, paus
 
 ## Polling and performance
 
-Choose **5, 15 or 30 seconds** in Settings. The default is 5 seconds; old unsupported preferences migrate to 5. Animation is independent of sensor polling, honors Reduce Motion, and can be disabled. The popover's animation pauses while closed. Fan control, while connected, adds a lightweight 10-second heartbeat and a one-second helper watchdog; it does not repeatedly enumerate processes on that heartbeat.
+Choose **5, 15 or 30 seconds** in Settings. The default is 5 seconds; old unsupported preferences migrate to 5. The orbit, flame pulse, fan rotation and menu indicator use continuous Core Animation on cached layers, independently of sensor polling. Animation honors Reduce Motion and can be disabled; the popover's animation pauses while closed. Fan control, while connected, adds a lightweight 10-second heartbeat and a one-second helper watchdog; it does not repeatedly enumerate processes on that heartbeat.
 
-Monitoring enumerates processes and reads supported SMC sensors on a serial utility queue. Longer polling intervals reduce that work. The open dashboard and animation cost more CPU than the closed menu indicator. Max fan mode itself uses more fan power. Performance depends on process count, sampling interval, macOS and hardware; measurements and their method are documented in [performance notes](docs/PERFORMANCE.md).
+Monitoring enumerates processes and reads supported SMC sensors on a serial utility queue. Longer polling intervals reduce that work. The dashboard and animation add drawing and compositing work; Max fan mode itself uses more fan power. Performance depends on process count, sampling interval, macOS and hardware; measurements and their method are documented in [performance notes](docs/PERFORMANCE.md).
 
 ## Build, test and inspect
 

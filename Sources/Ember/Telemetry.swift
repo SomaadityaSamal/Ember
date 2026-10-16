@@ -115,7 +115,7 @@ struct HistoryPoint: Identifiable {
         didSet { UserDefaults.standard.set(showCulprit, forKey: "showCulprit") }
     }
     @Published var animate = UserDefaults.standard.object(forKey: "animate") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(animate, forKey: "animate") }
+        didSet { UserDefaults.standard.set(animate, forKey: "animate"); onUpdate?() }
     }
     @Published var temperatureSource = TemperatureSource(rawValue: UserDefaults.standard.string(forKey: "temperatureSource") ?? "") ?? .cpuAverage {
         didSet { UserDefaults.standard.set(temperatureSource.rawValue, forKey: "temperatureSource"); onUpdate?() }

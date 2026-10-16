@@ -108,10 +108,15 @@ struct Dashboard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Button { monitor.fans.cycle() } label: {
-                    FanGlyph(spinning: monitor.sensors.fansSpinning, animated: monitor.animate && monitor.panelVisible)
-                        .frame(width: 24, height: 24).padding(9)
+                    Color.clear.frame(width: 24, height: 24).padding(9)
                         .background(Palette.amber.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
-                }.buttonStyle(.plain).disabled(monitor.fans.busy || monitor.sensors.fanCount == 0)
+                }.buttonStyle(.plain)
+                    // Keep the native animation outside the AppKit button's label host.
+                    .overlay {
+                        FanGlyph(spinning: monitor.sensors.fansSpinning, animated: monitor.animate && monitor.panelVisible)
+                            .frame(width: 24, height: 24).allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                    .disabled(monitor.fans.busy || monitor.sensors.fanCount == 0)
                     .help("Cycle fan mode: Auto → Max → Temperature")
                     .accessibilityLabel("Cycle fan control mode")
                 VStack(alignment: .leading, spacing: 4) {
@@ -399,21 +404,8 @@ struct ThermalOrb: View {
     let animate: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.5, paused: !animate || reduceMotion)) { context in
-            let phase = animate && !reduceMotion ? context.date.timeIntervalSinceReferenceDate : 0
-            ZStack {
-                Circle().fill(RadialGradient(colors: [level.color.opacity(0.13), .clear], center: .center, startRadius: 10, endRadius: 58))
-                Circle().stroke(level.color.opacity(0.1), lineWidth: 1).padding(5)
-                Circle().trim(from: 0.08, to: 0.91).stroke(level.color.opacity(0.3), style: .init(lineWidth: 1, lineCap: .round)).padding(12)
-                    .rotationEffect(.degrees(phase * 5))
-                Circle().fill(RadialGradient(colors: [level.color.opacity(0.16), level.color.opacity(0.025)], center: .center, startRadius: 0, endRadius: 40)).padding(20)
-                Image(systemName: level == .cool ? "leaf.fill" : "flame.fill")
-                    .font(.system(size: 34, weight: .light)).foregroundStyle(level.color)
-                    .shadow(color: level.color.opacity(0.35), radius: 12)
-                    .scaleEffect(1 + sin(phase * (level == .hot ? 2.8 : level == .warm ? 1.7 : 0.9)) * 0.035)
-                Circle().fill(level.color).frame(width: 4, height: 4).offset(x: 0, y: -50).rotationEffect(.degrees(phase * 5))
-            }
-        }.accessibilityLabel("Thermal state: \(level.title)")
+        SmoothThermalOrb(level: level, animated: animate && !reduceMotion)
+            .accessibilityLabel("Thermal state: \(level.title)")
     }
 }
 

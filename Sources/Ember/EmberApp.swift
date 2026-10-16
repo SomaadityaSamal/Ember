@@ -47,7 +47,6 @@ import FanIPC
     private var monitor: Monitor!
     private let popover = NSPopover()
     private var indicator: StatusIndicator!
-    private var animationTimer: Timer?
     private var localMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -65,12 +64,9 @@ import FanIPC
         popover.contentSize = NSSize(width: 460, height: 740)
         popover.contentViewController = NSHostingController(rootView: Dashboard(monitor: monitor))
         monitor.onUpdate = { [weak self] in self?.updateStatus() }
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.monitor.animate, self.monitor.sampling, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-                self.indicator.phase += 0.3
-                self.indicator.needsDisplay = true
-            }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+                                                         object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.updateStatus() }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
             let shouldConsume: Bool = MainActor.assumeIsolated {
@@ -111,18 +107,19 @@ import FanIPC
         guard let button = statusItem.button else { return }
         indicator.level = monitor.level
         indicator.paused = !monitor.sampling
-        indicator.needsDisplay = true
         let showTop = monitor.sampling && monitor.showCulprit && (monitor.level == .warm || monitor.level == .hot || monitor.sensors.fansSpinning)
         let name = showTop ? monitor.top?.name : nil
         let compactName = name.map { $0.count > 17 ? String($0.prefix(16)) + "…" : $0 }
         let temperature = monitor.displayTemperature.map { "\(Int($0.rounded()))°" }
         let title = [temperature, compactName].compactMap { $0 }.joined(separator: " · ")
-        button.title = ""
+        if !button.title.isEmpty { button.title = "" }
         // Keep the indicator in its own view so pulsing does not redraw text.
         let textWidth = (title as NSString).size(withAttributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)]).width
-        statusItem.length = title.isEmpty ? 28 : textWidth + 38
+        let length = title.isEmpty ? 28 : textWidth + 38
+        if statusItem.length != length { statusItem.length = length }
         indicator.frame = NSRect(x: 0, y: 0, width: statusItem.length, height: 22)
         indicator.title = title
+        indicator.updateAppearance(animated: monitor.animate && monitor.sampling && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         button.toolTip = "Ember · \(monitor.sampling ? monitor.level.title : "Paused")\n\(name.map { "Top CPU contributor: \($0)" } ?? "Click for temperatures and activity")"
         button.setAccessibilityValue("\(monitor.level.title), \(temperature ?? "temperature unavailable")\(name.map { ", top contributor \($0)" } ?? "")")
     }
@@ -138,32 +135,25 @@ import FanIPC
 }
 
 @MainActor final class StatusIndicator: NSView {
-    var phase = 0.0
     var level = HeatLevel.unknown
-    var title = ""
+    var title = "" { didSet { if title != oldValue { needsDisplay = true } } }
     var paused = false
-    private var cachedImage: NSImage?
-    private var cachedLevel: HeatLevel?
-    private var cachedPaused: Bool?
-    // Native AppKit coordinates keep SF Symbols upright in the status button.
+    private let glyph = SymbolMotionView(frame: NSRect(x: 5, y: 2, width: 20, height: 18))
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        addSubview(glyph)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    // Let the enclosing status button receive clicks.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    override func draw(_ dirtyRect: NSRect) {
-        let color: NSColor = paused ? .secondaryLabelColor : NSColor(level.color)
+    func updateAppearance(animated: Bool) {
         let speed = level == .hot ? 2.8 : level == .warm ? 1.7 : 0.9
-        let breath = paused ? 0 : sin(phase * speed)
-        if cachedImage == nil || cachedLevel != level || cachedPaused != paused {
-            let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
-            if let symbol = NSImage(systemSymbolName: paused ? "pause.circle" : level == .cool ? "leaf.fill" : "flame.fill", accessibilityDescription: nil)?.withSymbolConfiguration(config) {
-                cachedImage = NSImage(size: symbol.size, flipped: false) { bounds in
-                    symbol.draw(in: bounds); color.setFill(); bounds.fill(using: .sourceAtop); return true
-                }
-            }
-            cachedLevel = level; cachedPaused = paused
-        }
-        if let symbol = cachedImage {
-            let rect = NSRect(x: 7, y: (22 - symbol.size.height) / 2, width: symbol.size.width, height: symbol.size.height)
-            symbol.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 0.83 + breath * 0.17, respectFlipped: true, hints: nil)
-        }
+        glyph.configure(name: paused ? "pause.circle" : level == .cool ? "leaf.fill" : "flame.fill",
+                        pointSize: 13, color: paused ? .secondaryLabelColor : NSColor(level.color),
+                        rotating: false, pulseDuration: animated && !paused ? .pi / speed : nil, weight: .medium)
+    }
+    override func draw(_ dirtyRect: NSRect) {
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.labelColor]
         let sizeOfText = (title as NSString).size(withAttributes: attrs)
         (title as NSString).draw(at: NSPoint(x: 29, y: (22 - sizeOfText.height) / 2), withAttributes: attrs)
