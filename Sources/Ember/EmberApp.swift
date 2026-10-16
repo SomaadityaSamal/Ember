@@ -94,14 +94,38 @@ import FanIPC
         if !popover.isShown { togglePopover() }
         return false
     }
-    func popoverDidShow(_ notification: Notification) { monitor.panelVisible = true }
-    func popoverDidClose(_ notification: Notification) { monitor.panelVisible = false }
+    func popoverWillShow(_ notification: Notification) {
+        configurePopoverWindow()
+    }
+    private func configurePopoverWindow() {
+        // Join the current app's fullscreen Space instead of activating a hidden
+        // dashboard on another Space and disturbing its title-bar presentation.
+        guard let window = popover.contentViewController?.view.window else { return }
+        var behavior = window.collectionBehavior
+        behavior.subtract([.primary, .auxiliary, .fullScreenPrimary, .fullScreenNone, .canJoinAllSpaces, .managed, .stationary])
+        behavior.formUnion([.canJoinAllApplications, .fullScreenAuxiliary, .moveToActiveSpace, .transient, .ignoresCycle])
+        behavior.remove(.participatesInCycle)
+        if window.collectionBehavior != behavior { window.collectionBehavior = behavior }
+    }
+    func popoverDidShow(_ notification: Notification) {
+        configurePopoverWindow()
+        monitor.panelVisible = true
+    }
+    func popoverDidClose(_ notification: Notification) {
+        monitor.panelVisible = false
+        // Release activation as soon as Ember's only interface closes, allowing
+        // AppKit to finish its popover tracking and native menu-bar auto-hide.
+        if NSApp.isActive { NSApp.deactivate() }
+    }
     @objc func togglePopover() {
         if popover.isShown { popover.performClose(nil); return }
         guard let button = statusItem.button else { return }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+        // The popover's window may not exist yet in popoverWillShow on its
+        // first presentation. Apply the Space policy once it has been created.
+        configurePopoverWindow()
+        popover.contentViewController?.view.window?.makeKeyAndOrderFront(nil)
     }
     private func updateStatus() {
         guard let button = statusItem.button else { return }
@@ -117,11 +141,14 @@ import FanIPC
         let textWidth = (title as NSString).size(withAttributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)]).width
         let length = title.isEmpty ? 28 : textWidth + 38
         if statusItem.length != length { statusItem.length = length }
-        indicator.frame = NSRect(x: 0, y: 0, width: statusItem.length, height: 22)
+        let frame = NSRect(x: 0, y: 0, width: statusItem.length, height: 22)
+        if indicator.frame != frame { indicator.frame = frame }
         indicator.title = title
         indicator.updateAppearance(animated: monitor.animate && monitor.sampling && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
-        button.toolTip = "Ember · \(monitor.sampling ? monitor.level.title : "Paused")\n\(name.map { "Top CPU contributor: \($0)" } ?? "Click for temperatures and activity")"
-        button.setAccessibilityValue("\(monitor.level.title), \(temperature ?? "temperature unavailable")\(name.map { ", top contributor \($0)" } ?? "")")
+        let toolTip = "Ember · \(monitor.sampling ? monitor.level.title : "Paused")\n\(name.map { "Top CPU contributor: \($0)" } ?? "Click for temperatures and activity")"
+        if button.toolTip != toolTip { button.toolTip = toolTip }
+        let accessibilityValue = "\(monitor.level.title), \(temperature ?? "temperature unavailable")\(name.map { ", top contributor \($0)" } ?? "")"
+        if button.accessibilityValue() as? String != accessibilityValue { button.setAccessibilityValue(accessibilityValue) }
     }
     private func saveSnapshot(_ path: String) {
         let host = NSHostingView(rootView: AnyView(Dashboard(monitor: monitor)))

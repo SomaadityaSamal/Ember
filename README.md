@@ -4,6 +4,8 @@ A native macOS menu bar monitor with an animated thermal indicator, clear temper
 
 Requires macOS 14 or later. No network requests, analytics, or third-party runtime dependencies.
 
+The dashboard uses a transient popover that can join another app's fullscreen Space and releases Ember's focus when dismissed. macOS controls menu-bar auto-hide timing; Ember does not change the system's menu-bar hide preferences.
+
 ## Install and run
 
 Download the Apple Silicon release ZIP from [Releases](https://github.com/SomaadityaSamal/Ember/releases), verify its SHA-256 checksum, and move `Ember.app` to `/Applications`. Launch it and click the Ember indicator for the dashboard. The current binary is arm64; Intel Macs require a source build. Source builds require Swift 6 or newer and Xcode or Command Line Tools:
