@@ -1,0 +1,33 @@
+name: Build and verify
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Unit and process-safety tests
+        run: ./scripts/test.sh
+      - name: Check public source hygiene
+        run: python3 scripts/privacy-audit.py
+      - name: Analyze the native bridge
+        run: clang --analyze -I Sources/TelemetryBridge/include Sources/TelemetryBridge/TelemetryBridge.c
+      - name: Build signed app bundle
+        run: ./scripts/build-app.sh
+      - name: Inspect release contents and signatures
+        run: python3 scripts/privacy-audit.py --app build/Ember.app
+      - name: Package preview
+        run: ./scripts/package-release.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Ember-macOS-preview
+          path: |
+            dist/Ember-*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
