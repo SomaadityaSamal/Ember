@@ -95,7 +95,9 @@ import HeatCore
             message = "Quit Macs Fan Control before giving Ember control."; return
         }
         guard connected else { message = "Enable and connect the fan helper first."; return }
-        mode = newMode; evaluate()
+        mode = newMode
+        if newMode == .automatic && !maximumActive && !busy { message = "macOS manages your fans" }
+        evaluate()
     }
     func update(temperature: Double?, paused: Bool) {
         lastTemperature = temperature; lastSample = Date(); self.paused = paused; evaluate()
