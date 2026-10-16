@@ -215,7 +215,8 @@ struct Dashboard: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.amber.opacity(0.17)))
     }
     private var contributors: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let items = monitor.visibleActivities(limit: showAll ? 100 : 5)
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 sectionTitle("LIKELY HEAT CONTRIBUTORS")
                 Spacer()
@@ -237,12 +238,12 @@ struct Dashboard: View {
                 Text("CPU").frame(width: 48, alignment: .trailing)
                 Text("HEAT EST.").frame(width: 65, alignment: .trailing)
             }.font(.system(size: 8, weight: .medium)).tracking(0.6).foregroundStyle(Palette.muted)
-            VStack(spacing: 0) {
-                if monitor.filtered.isEmpty {
+            LazyVStack(spacing: 0) {
+                if items.isEmpty {
                     Text(monitor.lastUpdate == nil || monitor.history.count < 2 ? "Taking the first activity sample…" : "No matching activity")
                         .font(.system(size: 11)).foregroundStyle(Palette.muted).frame(maxWidth: .infinity).padding(.vertical, 20)
                 }
-                ForEach(Array(monitor.filtered.prefix(showAll ? 100 : 5))) { item in
+                ForEach(items) { item in
                     activityRow(item)
                 }
             }
@@ -387,9 +388,10 @@ struct Dashboard: View {
 
 struct AppIcon: View {
     let path: String?
+    @Environment(\.displayScale) private var displayScale
     var body: some View {
         if let path {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: path)).resizable().interpolation(.high)
+            Image(nsImage: AppIconCache.shared.icon(path: path, scale: displayScale)).resizable().interpolation(.high)
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.055))

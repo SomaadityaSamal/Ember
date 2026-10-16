@@ -6,6 +6,33 @@ Measured locally on an Apple M4 Mac, macOS 27, using release arm64 builds. These
 
 Each row uses six five-second `top` intervals after discarding its initial sample. **100% CPU means one logical core**, as in Activity Monitor. Memory is the final `top` memory value for the menu bar app; the optional root helper and fan client are separate processes.
 
+### Ember 0.2.2: less work between readings
+
+Process grouping now updates member arrays in place, reuses parsed app names and paths, and retains metadata only for paths in the current sample. Fresh executable paths and parent relationships are still read each time. Regression tests cover exec without PID/start-time changes, reparenting, and exact totals for a 512-helper group.
+
+Optimized standalone Swift builds of the same synthetic fixture measured these median process CPU times over three runs:
+
+| Fixture | 0.2.1 | 0.2.2 |
+| --- | ---: | ---: |
+| 1,000 processes, 100 samples/run | 2.247 ms/sample | 0.247 ms/sample |
+| 2,000 processes, 30 samples/run | 7.540 ms/sample | 0.487 ms/sample |
+
+Both fixtures put 75% of processes in one app and leave the rest as standalone workers to stress aggregation. They validate member counts and CPU totals on every sample. These are synthetic grouping measurements, not whole-app CPU reductions or energy measurements. Reproduce them with:
+
+```sh
+git fetch --tags
+./scripts/benchmark-grouping.sh v0.2.1
+./scripts/benchmark-grouping.sh
+```
+
+The expanded activity view uses lazy rows, selects only the requested five or 100 matches, and caches 27-point icons at the display's pixel scale. NSCache has 128-item/2 MiB eviction budgets; icons refresh on access after five minutes without a separate timer. App metadata and icons remain in memory only.
+
+No client heartbeat timer runs in Auto or while threshold mode awaits a hot sample. When maximum control is active, a ten-second timer (one-second coalescing tolerance) renews the helper lease, including during UI tracking. Sensor polls still evaluate changes immediately; they no longer send duplicate renewals. The helper watchdog and 45-second expiry are unchanged.
+
+The final installed build, with animation on, 15-second polling, the dashboard closed and fan control connected in Auto, averaged **0.27% of one core** (peak 0.80%) and **55 MB** across six five-second intervals after initial sampling. Other apps were active. This configuration differs from the older five-second observations below, so it is not a controlled before/after comparison.
+
+On the target M4, Max remained confirmed after 50 seconds, beyond the helper's 45-second lease, proving that the demand-driven heartbeat renewed it. Target was 6,550 RPM and actual speed was about 6,547 RPM. Pausing then returned firmware mode to Auto and cleared the diagnostic flag. App/PID search, both activity filters, lazy scrolling, expanded details and thumbnail clarity were checked in the installed app.
+
 ### Ember 0.2.1: continuous animation
 
 | Dashboard | Animation | Polling | Mean CPU | Peak CPU | App memory |
@@ -38,7 +65,7 @@ Numbers vary with process count, thermal state, hardware, panel content and OS. 
 
 ## Verified behavior
 
-- Eleven Swift tests cover temperature classification, selected sensor sources, CPU timing and attribution, sustained activity, PID reuse, safe signaling, 5/15/30-second polling math, fan policies and unprivileged hardware rejection.
+- Thirteen Swift tests cover temperature classification, selected sensor sources, CPU timing and attribution, exec/reparenting, large helper groups, sustained activity, PID reuse, safe signaling, 5/15/30-second polling math, fan policies and unprivileged hardware rejection.
 - A deterministic SMC simulator covers delayed firmware transitions in both directions, failed unlock/target writes, ownership conflicts, invalid values, maximum readback, and retryable restoration. It never touches hardware.
 - On the target M4, Max selected a 6,550 RPM firmware target and actual fan speed reached approximately 6,553 RPM. Threshold changes to 45°C triggered Max; changing to 100°C returned to Auto. The threshold was restored to 80°C. These tests did not deliberately heat the laptop.
 - Keeping a client connected without sending heartbeats caused the 45-second helper lease to expire and restore Auto. Firmware mode and diagnostic-flag readings confirmed restoration after 47 seconds. Normal app exit/crash also released control.

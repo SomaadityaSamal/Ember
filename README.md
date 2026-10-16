@@ -55,6 +55,8 @@ Choose **5, 15 or 30 seconds** in Settings. The default is 5 seconds; old unsupp
 
 Monitoring enumerates processes and reads supported SMC sensors on a serial utility queue. Longer polling intervals reduce that work. The dashboard and animation add drawing and compositing work; Max fan mode itself uses more fan power. Performance depends on process count, sampling interval, macOS and hardware; measurements and their method are documented in [performance notes](docs/PERFORMANCE.md).
 
+Process groups accumulate members in place and cache app metadata only for executable paths in the latest sample. The activity list loads rows as needed and caches small Retina-aware icons, with 128-item/2 MiB eviction budgets and five-minute refreshes. The client heartbeat runs only while maximum control is active; threshold decisions still run on every sensor poll. Idle Auto mode sends no repeated fan requests. The helper's independent restoration watchdog is unchanged.
+
 ## Build, test and inspect
 
 ```sh

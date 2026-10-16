@@ -6,9 +6,9 @@ import HeatCore
 
 @MainActor final class FanController: ObservableObject {
     @Published private(set) var mode: FanMode = .automatic
-    @Published private(set) var maximumActive = false
+    @Published private(set) var maximumActive = false { didSet { updateHeartbeat() } }
     @Published private(set) var busy = false
-    @Published private(set) var connected = false
+    @Published private(set) var connected = false { didSet { updateHeartbeat() } }
     @Published private(set) var message = "macOS manages your fans"
     @Published var threshold = FanSettings.threshold(UserDefaults.standard.object(forKey: "fanThreshold") as? Double ?? 80) {
         didSet {
@@ -32,10 +32,17 @@ import HeatCore
     var conflictingController: Bool {
         NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "com.crystalidea.macsfancontrol" }
     }
-    init() {
-        heartbeat = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.evaluate() }
+    private func updateHeartbeat() {
+        guard connected && maximumActive else {
+            heartbeat?.invalidate(); heartbeat = nil; return
         }
+        guard heartbeat == nil else { return }
+        let timer = Timer(timeInterval: 10, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.evaluate(renewLease: true) }
+        }
+        timer.tolerance = 1
+        RunLoop.main.add(timer, forMode: .common)
+        heartbeat = timer
     }
     func enable() {
         guard !conflictingController else { message = "Quit Macs Fan Control before giving Ember control."; return }
@@ -106,7 +113,10 @@ import HeatCore
     func wake() { asleep = false; lastSample = nil; if connected { send(false) } }
     func shutdown() {
         // Invalidating also makes the helper restore independently if the reply cannot arrive.
+        timeout?.cancel(); requestID = UUID()
         connection?.invalidate(); connection = nil
+        connected = false; maximumActive = false; busy = false; mode = .automatic
+        policy = FanPolicy()
     }
     func remove() {
         mode = .automatic
@@ -117,12 +127,18 @@ import HeatCore
         do { try service.unregister(); serviceStatus = service.status; shutdown(); message = "Fan helper removed" }
         catch { message = error.localizedDescription }
     }
-    private func evaluate() {
+    private func evaluate(renewLease: Bool = false) {
         guard connected, !busy else { return }
         if mode == .automatic && !maximumActive { return }
         let stale = lastSample.map { Date().timeIntervalSince($0) > 45 } ?? true
         let shouldMax = policy.evaluate(mode: mode, temperature: stale ? nil : lastTemperature, threshold: threshold,
                                         paused: paused || asleep || stale || conflictingController)
+        if !shouldMax && !maximumActive {
+            let status = mode == .threshold ? "Auto until peak reaches \(Int(threshold))°C" : "macOS manages your fans"
+            if message != status { message = status }
+            return
+        }
+        if shouldMax && maximumActive && !renewLease { return }
         send(shouldMax)
     }
     private func send(_ maximum: Bool, removeAfter: Bool = false) {
@@ -158,6 +174,7 @@ import HeatCore
         }
     }
     private func disconnected() {
+        requestID = UUID()
         timeout?.cancel(); connected = false; busy = false; maximumActive = false; mode = .automatic
         connection = nil; serviceStatus = service.status
         message = "Fan helper disconnected; automatic restoration requested."

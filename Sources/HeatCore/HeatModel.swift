@@ -66,39 +66,67 @@ public struct ProcessActivity: Identifiable, Sendable {
 }
 
 public struct ActivityTracker: Sendable {
+    private struct AppMetadata: Sendable {
+        let path: String?
+        let name: String?
+        init(executable: String) {
+            if let range = executable.range(of: ".app/") {
+                let app = String(executable[..<range.lowerBound]) + ".app"
+                path = app; name = URL(fileURLWithPath: app).deletingPathExtension().lastPathComponent
+            } else { path = nil; name = nil }
+        }
+    }
     private var previous: [ProcessIdentity: UInt64] = [:]
     private var previousTime: Double?
     private var sustained: [String: Double] = [:]
+    private var appMetadata: [String: AppMetadata] = [:]
     public init() {}
-    public mutating func reset() { previous = [:]; previousTime = nil; sustained = [:] }
+    public mutating func reset() { previous = [:]; previousTime = nil; sustained = [:]; appMetadata = [:] }
     public mutating func sample(_ readings: [ProcessReading], at time: Double, foregroundPath: String?) -> [ProcessActivity] {
         defer {
-            previous = Dictionary(readings.map { ($0.identity, $0.cpuTime) }, uniquingKeysWith: { _, new in new })
+            var counters: [ProcessIdentity: UInt64] = [:]
+            counters.reserveCapacity(readings.count)
+            for reading in readings { counters[reading.identity] = reading.cpuTime }
+            previous = counters
             previousTime = time
         }
-        guard let last = previousTime, time > last, time - last <= PollingCycle.maximumSampleGap else { sustained = [:]; return [] }
+        guard let last = previousTime, time > last, time - last <= PollingCycle.maximumSampleGap else {
+            sustained = [:]; appMetadata = [:]; return []
+        }
         let elapsed = time - last
-        let byPID = Dictionary(readings.map { ($0.identity.pid, $0) }, uniquingKeysWith: { _, new in new })
+        var byPID: [Int32: ProcessReading] = [:]
+        byPID.reserveCapacity(readings.count)
+        var metadata: [String: AppMetadata] = [:]
+        for reading in readings {
+            byPID[reading.identity.pid] = reading
+            if metadata[reading.path] == nil {
+                metadata[reading.path] = appMetadata[reading.path] ?? AppMetadata(executable: reading.path)
+            }
+        }
+        // Retain only paths in this sample. Exec and reparenting use fresh paths
+        // and ancestry; exited applications cannot grow the cache indefinitely.
+        appMetadata = metadata
         var groups: [String: ProcessActivity] = [:]
         for reading in readings {
             guard let old = previous[reading.identity], reading.cpuTime >= old else { continue }
             let cpu = Double(reading.cpuTime - old) / 1_000_000_000 / elapsed * 100
             // Attribute helpers spawned outside an app bundle to the nearest app ancestor.
-            var app = reading.appPath
-            var parent = reading.parentPID
-            var visited: Set<Int32> = [reading.identity.pid]
-            while app == nil, parent > 1, visited.insert(parent).inserted, let ancestor = byPID[parent] {
-                app = ancestor.appPath; parent = ancestor.parentPID
+            var info = metadata[reading.path]!
+            if info.path == nil && reading.parentPID > 1 {
+                var parent = reading.parentPID
+                var visited: Set<Int32> = [reading.identity.pid]
+                while info.path == nil, parent > 1, visited.insert(parent).inserted, let ancestor = byPID[parent] {
+                    info = metadata[ancestor.path]!; parent = ancestor.parentPID
+                }
             }
+            let app = info.path
             let id = app ?? "pid:\(reading.identity.pid):\(reading.identity.seconds):\(reading.identity.microseconds)"
-            var group = groups[id] ?? ProcessActivity(
+            groups[id, default: ProcessActivity(
                 id: id,
-                name: app.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? reading.name,
+                name: info.name ?? reading.name,
                 appPath: app, members: [], cpu: 0, share: 0, memory: 0,
                 background: app == nil || app != foregroundPath, sustainedSeconds: 0
-            )
-            group.members.append(reading); group.cpu += cpu; group.memory += reading.memory
-            groups[id] = group
+            )].include(reading, cpu: cpu)
         }
         let total = groups.values.reduce(0) { $0 + $1.cpu }
         var nextSustained: [String: Double] = [:]
@@ -107,11 +135,17 @@ public struct ActivityTracker: Sendable {
             g.share = total > 0.5 ? g.cpu / total * 100 : 0
             let high = (g.background && g.cpu >= 20) || g.cpu >= 100
             g.sustainedSeconds = high ? (sustained[g.id] ?? 0) + elapsed : 0
-            nextSustained[g.id] = g.sustainedSeconds
+            if high { nextSustained[g.id] = g.sustainedSeconds }
             return g
         }.sorted { $0.cpu > $1.cpu }
         sustained = nextSustained
         return result
+    }
+}
+
+private extension ProcessActivity {
+    mutating func include(_ reading: ProcessReading, cpu amount: Double) {
+        members.append(reading); cpu += amount; memory += reading.memory
     }
 }
 

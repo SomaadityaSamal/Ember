@@ -41,6 +41,36 @@ import TelemetryBridge
         #expect(result.count == 1)
         #expect(try #require(result.first).members.count == 2)
     }
+    @Test func attributionFollowsExecAndReparenting() throws {
+        var tracker = ActivityTracker()
+        let first = [row(10, cpu: 0), row(30, cpu: 0, path: "/Applications/Editor.app/Contents/MacOS/Editor"),
+                     row(20, cpu: 0, path: "/usr/bin/helper", parent: 10)]
+        _ = tracker.sample(first, at: 1, foregroundPath: nil)
+        var next = first
+        next[2].cpuTime = 1_000_000_000
+        #expect(try #require(tracker.sample(next, at: 2, foregroundPath: nil).first).name == "Browser")
+        // Exec preserves PID and start time; the executable path can still change.
+        next[0].path = "/Applications/Replacement.app/Contents/MacOS/Replacement"
+        next[2].cpuTime += 1_000_000_000
+        let replaced = tracker.sample(next, at: 3, foregroundPath: nil)
+        #expect(try #require(replaced.first).name == "Replacement")
+        #expect(!replaced.contains { $0.name == "Browser" })
+        next[2].parentPID = 30
+        next[2].cpuTime += 1_000_000_000
+        let reparented = try #require(tracker.sample(next, at: 4, foregroundPath: "/Applications/Editor.app").first)
+        #expect(reparented.name == "Editor" && reparented.members.count == 2 && !reparented.background)
+    }
+    @Test func largeHelperGroupRetainsEveryMemberAndTotal() throws {
+        var tracker = ActivityTracker()
+        let initial = (0..<512).map { row(Int32($0 + 10), cpu: 0) } + [row(2000, cpu: 0, path: "/usr/bin/worker")]
+        _ = tracker.sample(initial, at: 1, foregroundPath: nil)
+        let next = initial.map { item in var item = item; item.cpuTime = 1_000_000_000; return item }
+        let result = tracker.sample(next, at: 2, foregroundPath: nil)
+        let app = try #require(result.first)
+        #expect(app.members.count == 512 && app.cpu == 51_200 && app.memory == 51_200)
+        #expect(result.reduce(0) { $0 + $1.members.count } == 513)
+        #expect(abs(result.reduce(0) { $0 + $1.share } - 100) < 0.00001)
+    }
     @Test func pidReuseAndCounterResetDoNotCreateSpikes() {
         var tracker = ActivityTracker()
         _ = tracker.sample([row(10, cpu: 9_000_000_000)], at: 1, foregroundPath: nil)

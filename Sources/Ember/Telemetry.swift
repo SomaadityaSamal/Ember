@@ -25,6 +25,7 @@ final class TelemetryReader: @unchecked Sendable {
         defer { ember_free_processes(pointer) }
         guard let pointer else { return ([], 0, Int(total)) }
         var rows: [ProcessReading] = []
+        rows.reserveCapacity(Int(count))
         for i in 0..<Int(count) {
             var raw = pointer[i]
             let name = withUnsafePointer(to: &raw.name) { $0.withMemoryRebound(to: CChar.self, capacity: 64) { String(cString: $0) } }
@@ -137,11 +138,11 @@ struct HistoryPoint: Identifiable {
     var anomalies: [ProcessActivity] { activities.filter { $0.anomaly != nil } }
     var totalCPU: Double { activities.reduce(0) { $0 + $1.cpu } / Double(ProcessInfo.processInfo.activeProcessorCount) }
     var pressureLabel: String { ["Nominal", "Fair", "Serious", "Critical"][min(3, max(0, pressure))] }
-    var filtered: [ProcessActivity] {
-        activities.filter { activity in
+    func visibleActivities(limit: Int) -> [ProcessActivity] {
+        Array(activities.lazy.filter { [search, filter] activity in
             (search.isEmpty || activity.name.localizedCaseInsensitiveContains(search) || activity.members.contains { String($0.identity.pid).contains(search) }) &&
             (filter == .all || (filter == .apps && activity.appPath != nil) || (filter == .background && activity.background))
-        }
+        }.prefix(limit))
     }
     init() {
         fanSubscription = fans.objectWillChange.sink { [weak self] _ in
